@@ -16,7 +16,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-31b-it}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-3.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
       - TEST_MODE=${TEST_MODE:-false}
     env_file:
@@ -52,7 +52,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-31b-it}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-3.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
       - TEST_MODE=${TEST_MODE:-false}
     env_file:
@@ -94,7 +94,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-31b-it}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-3.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
       - TEST_MODE=${TEST_MODE:-false}
     env_file:

@@ -120,7 +120,7 @@ def chat(request: ChatRequest):
         response = rag_engine.chat(
             question=request.question,
             session_id=request.session_id or "default",
-            model=request.model or "gemma-4-31b-it",
+            model=request.model or os.getenv("DEFAULT_MODEL", "gemini-3.5-flash-lite"),
             temperature=request.temperature or 0.0,
             k=request.k or 4,
             strict_mode=request.strict_mode if request.strict_mode is not None else True,

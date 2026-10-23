@@ -62,23 +62,88 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# Custom CSS for OpenWebUI Aesthetic & Navbar
+# Theme & Custom CSS (Dark and Light Mode)
 # ==============================================================================
-st.markdown(
+if "theme_mode" not in st.session_state:
+    st.session_state.theme_mode = "dark"
+
+is_dark = (st.session_state.theme_mode == "dark")
+
+if is_dark:
+    theme_vars = """
+        --bg-main: #0b0f19;
+        --bg-secondary: #111827;
+        --bg-card: #111827;
+        --bg-card-alt: #0d131f;
+        --bg-hover: #1f2937;
+        --border-color: #1f2937;
+        --border-subtle: #374151;
+        --text-primary: #f9fafb;
+        --text-secondary: #e5e7eb;
+        --text-muted: #9ca3af;
+        --navbar-gradient: linear-gradient(180deg, #111827 0%, #0d131f 100%);
+        --telemetry-bg: rgba(17, 24, 39, 0.6);
+        --telemetry-badge-bg: #1f2937;
+        --telemetry-badge-text: #d1d5db;
+        --terminal-bg: #090d16;
+        --terminal-border: #2e384d;
+        --terminal-text: #a5b4fc;
+        --hero-avatar-gradient: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        --pill-bg: rgba(59, 130, 246, 0.15);
+        --pill-border: rgba(59, 130, 246, 0.3);
+        --pill-text: #60a5fa;
     """
+else:
+    theme_vars = """
+        --bg-main: #f8fafc;
+        --bg-secondary: #ffffff;
+        --bg-card: #ffffff;
+        --bg-card-alt: #f1f5f9;
+        --bg-hover: #e2e8f0;
+        --border-color: #e2e8f0;
+        --border-subtle: #cbd5e1;
+        --text-primary: #0f172a;
+        --text-secondary: #1e293b;
+        --text-muted: #64748b;
+        --navbar-gradient: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        --telemetry-bg: rgba(241, 245, 249, 0.9);
+        --telemetry-badge-bg: #ffffff;
+        --telemetry-badge-text: #334155;
+        --terminal-bg: #f1f5f9;
+        --terminal-border: #cbd5e1;
+        --terminal-text: #312e81;
+        --hero-avatar-gradient: linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%);
+        --pill-bg: rgba(37, 99, 235, 0.1);
+        --pill-border: rgba(37, 99, 235, 0.25);
+        --pill-text: #2563eb;
+    """
+
+st.markdown(
+    f"""
     <style>
     /* Google Fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-    /* Global Typography & Palette */
-    html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
+    :root {{
+        {theme_vars}
+    }}
 
-    /* =========================================================================
-       1. Hide Streamlit status, stop button, and deploy controls
-       ========================================================================= */
-    /* Keep Streamlit's main menu available: it includes the sidebar toggle. */
+    /* Global Typography & Palette */
+    html, body, [class*="css"], .stApp {{
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }}
+
+    .stApp, [data-testid="stAppViewContainer"] {{
+        background-color: var(--bg-main) !important;
+        color: var(--text-primary) !important;
+    }}
+
+    [data-testid="stSidebar"] {{
+        background-color: var(--bg-secondary) !important;
+        border-right: 1px solid var(--border-color) !important;
+    }}
+
+    /* 1. Hide Streamlit status, stop button, and deploy controls */
     [data-testid="stStatusWidget"],
     .stStatusWidget,
     button[aria-label="Stop"],
@@ -88,7 +153,7 @@ st.markdown(
     .stDeployButton,
     button[title="Deploy this app"],
     header[data-testid="stHeader"] .stDeployButton,
-    header[data-testid="stHeader"] [data-testid="stDeployButton"] {
+    header[data-testid="stHeader"] [data-testid="stDeployButton"] {{
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
@@ -98,70 +163,76 @@ st.markdown(
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
-    }
+    }}
 
-    /* Streamlit Header: Make transparent so it blends with dark mode */
-    header[data-testid="stHeader"] {
+    header[data-testid="stHeader"] {{
         background-color: transparent !important;
-    }
+    }}
 
-    /* Side Menu / Sidebar Toggle (ensure it is clearly visible and clickable) */
-    [data-testid="collapsedControl"] {
+    [data-testid="collapsedControl"] {{
         visibility: visible !important;
         z-index: 999999 !important;
-    }
+    }}
 
-    /* =========================================================================
-       2. Top Navbar Styling
-       ========================================================================= */
-    .navbar-container {
-        background: linear-gradient(180deg, #111827 0%, #0d131f 100%);
-        border: 1px solid #1f2937;
-        border-radius: 14px;
-        padding: 10px 18px 8px 18px;
-        margin-bottom: 14px;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
-    }
-    .brand-title {
+    /* 2. Top Appbar & Navbar Styling */
+    .brand-title {{
         display: flex;
         align-items: center;
         gap: 8px;
         font-size: 1.15rem;
         font-weight: 700;
-        color: #f3f4f6;
+        color: var(--text-primary) !important;
         letter-spacing: -0.01em;
-    }
-    .brand-emblem {
+    }}
+    .brand-emblem {{
         font-size: 1.4rem;
         line-height: 1;
-    }
-    .brand-version-pill {
-        background: rgba(59, 130, 246, 0.15);
-        color: #60a5fa;
-        border: 1px solid rgba(59, 130, 246, 0.3);
+    }}
+    .brand-version-pill {{
+        background: var(--pill-bg) !important;
+        color: var(--pill-text) !important;
+        border: 1px solid var(--pill-border) !important;
         border-radius: 9999px;
         padding: 1px 7px;
         font-size: 0.68rem;
         font-weight: 600;
         letter-spacing: 0.04em;
         margin-left: 4px;
-    }
+    }}
+
+    /* Full-width Appbar Segmented Control */
+    [data-testid="stSegmentedControl"] {{
+        width: 100% !important;
+        margin-top: 6px;
+    }}
+    [data-testid="stSegmentedControl"] [role="radiogroup"] {{
+        width: 100% !important;
+        display: flex !important;
+        gap: 4px !important;
+    }}
+    [data-testid="stSegmentedControl"] [role="radiogroup"] button {{
+        flex: 1 1 0px !important;
+        white-space: nowrap !important;
+        justify-content: center !important;
+        font-size: 0.85rem !important;
+        padding: 6px 10px !important;
+    }}
 
     /* Sub-Navbar Telemetry Bar */
-    .telemetry-strip {
+    .telemetry-strip {{
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 6px 14px;
-        background: rgba(17, 24, 39, 0.6);
-        border: 1px solid #1f2937;
+        background: var(--telemetry-bg) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 8px;
         margin-bottom: 16px;
         font-size: 0.78rem;
         font-family: 'JetBrains Mono', monospace;
-        color: #9ca3af;
-    }
-    .telemetry-dot {
+        color: var(--text-muted) !important;
+    }}
+    .telemetry-dot {{
         width: 8px;
         height: 8px;
         border-radius: 50%;
@@ -169,31 +240,29 @@ st.markdown(
         box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
         display: inline-block;
         margin-right: 6px;
-    }
-    .telemetry-badge-tag {
-        background: #1f2937;
-        border: 1px solid #374151;
-        color: #d1d5db;
+    }}
+    .telemetry-badge-tag {{
+        background: var(--telemetry-badge-bg) !important;
+        border: 1px solid var(--border-subtle) !important;
+        color: var(--telemetry-badge-text) !important;
         border-radius: 6px;
         padding: 2px 8px;
         font-size: 0.72rem;
         margin-left: 6px;
-    }
+    }}
 
-    /* =========================================================================
-       3. Sidebar Styling
-       ========================================================================= */
-    .cluster-card {
-        background: #111827;
-        border: 1px solid #1f2937;
+    /* 3. Sidebar Styling */
+    .cluster-card {{
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 10px;
         padding: 10px 14px;
         margin-bottom: 12px;
         display: flex;
         align-items: center;
         gap: 12px;
-    }
-    .cluster-icon {
+    }}
+    .cluster-icon {{
         width: 34px;
         height: 34px;
         border-radius: 8px;
@@ -203,121 +272,119 @@ st.markdown(
         align-items: center;
         justify-content: center;
         font-size: 1.1rem;
-    }
-    .cluster-info-title {
+    }}
+    .cluster-info-title {{
         font-size: 0.88rem;
         font-weight: 600;
-        color: #f3f4f6;
-    }
-    .cluster-info-meta {
+        color: var(--text-primary) !important;
+    }}
+    .cluster-info-meta {{
         font-size: 0.72rem;
         font-family: 'JetBrains Mono', monospace;
         color: #10b981;
-    }
-    .sidebar-section-header {
+    }}
+    .sidebar-section-header {{
         font-size: 0.72rem;
         font-weight: 700;
         letter-spacing: 0.08em;
-        color: #6b7280;
+        color: var(--text-muted) !important;
         text-transform: uppercase;
-        margin: 16px 0 8px 0;
+        margin: 12px 0 6px 0;
         display: flex;
         justify-content: space-between;
         align-items: center;
-    }
-    .session-count-badge {
-        background: #1f2937;
-        color: #9ca3af;
+    }}
+    .session-count-badge {{
+        background: var(--bg-hover) !important;
+        color: var(--text-muted) !important;
         border-radius: 9999px;
         padding: 1px 7px;
         font-size: 0.7rem;
-    }
+    }}
 
-    /* =========================================================================
-       4. Hero & Suggestion Cards
-       ========================================================================= */
-    .hero-wrapper {
+    /* 4. Hero & Suggestion Cards */
+    .hero-wrapper {{
         text-align: center;
         padding: 26px 16px 16px 16px;
         max-width: 820px;
         margin: 0 auto;
-    }
-    .hero-glow-avatar {
+    }}
+    .hero-glow-avatar {{
         display: inline-flex;
         align-items: center;
         justify-content: center;
         width: 62px;
         height: 62px;
         border-radius: 18px;
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        background: var(--hero-avatar-gradient) !important;
         border: 1px solid #3b82f6;
-        box-shadow: 0 0 25px rgba(59, 130, 246, 0.25);
+        box-shadow: 0 0 25px rgba(59, 130, 246, 0.2);
         font-size: 1.9rem;
         margin-bottom: 12px;
-    }
-    .hero-heading {
+    }}
+    .hero-heading {{
         font-size: 1.7rem;
         font-weight: 700;
-        color: #f9fafb;
+        color: var(--text-primary) !important;
         letter-spacing: -0.02em;
         margin-bottom: 6px;
-    }
-    .hero-desc {
+    }}
+    .hero-desc {{
         font-size: 0.92rem;
-        color: #9ca3af;
+        color: var(--text-muted) !important;
         line-height: 1.5;
         margin-bottom: 22px;
-    }
+    }}
 
-    /* =========================================================================
-       5. Messages & Reasoning Terminal
-       ========================================================================= */
-    .msg-meta-line {
+    /* 5. Messages & Reasoning Terminal */
+    .msg-meta-line {{
         font-size: 0.75rem;
-        color: #6b7280;
+        color: var(--text-muted) !important;
         margin-bottom: 6px;
         display: flex;
         align-items: center;
         gap: 6px;
-    }
-    .msg-meta-model {
+    }}
+    .msg-meta-model {{
         font-weight: 600;
-        color: #93c5fd;
-    }
-    .msg-meta-cosine {
+        color: #3b82f6;
+    }}
+    .msg-meta-cosine {{
         color: #10b981;
         font-family: 'JetBrains Mono', monospace;
-    }
-    .thought-terminal {
-        background: #090d16;
-        border: 1px solid #2e384d;
+    }}
+    .thought-terminal {{
+        background: var(--terminal-bg) !important;
+        border: 1px solid var(--terminal-border) !important;
         border-radius: 8px;
         padding: 12px 16px;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.82rem;
-        color: #a5b4fc;
+        color: var(--terminal-text) !important;
         line-height: 1.55;
         white-space: pre-wrap;
         margin-bottom: 12px;
-    }
-    .grounded-response-card {
-        background: #0d131f;
-        border: 1px solid #1f2937;
+    }}
+    .grounded-response-card {{
+        background: var(--bg-card-alt) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 12px;
         padding: 16px 20px;
         margin-bottom: 12px;
         line-height: 1.6;
-    }
-    .source-card {
-        background: #111827;
-        border: 1px solid #1f2937;
-        border-left: 3px solid #3b82f6;
+        color: var(--text-secondary) !important;
+    }}
+    .source-card {{
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-left: 3px solid #3b82f6 !important;
         border-radius: 0 8px 8px 0;
         padding: 12px 16px;
         margin: 8px 0;
         font-size: 0.86rem;
-    }
-    .chunk-tag {
+        color: var(--text-secondary) !important;
+    }}
+    .chunk-tag {{
         display: inline-block;
         background: #1e3a8a;
         color: #bfdbfe;
@@ -326,8 +393,8 @@ st.markdown(
         font-size: 0.72rem;
         font-weight: 600;
         margin-right: 6px;
-    }
-    .relevance-tag {
+    }}
+    .relevance-tag {{
         display: inline-block;
         background: #064e3b;
         color: #6ee7b7;
@@ -335,42 +402,40 @@ st.markdown(
         border-radius: 6px;
         font-size: 0.72rem;
         font-weight: 600;
-    }
+    }}
 
-    /* =========================================================================
-       6. Bottom Input Badges
-       ========================================================================= */
-    .input-badge-container {
+    /* 6. Bottom Input Badges */
+    .input-badge-container {{
         display: flex;
         align-items: center;
         gap: 8px;
         margin-bottom: 8px;
         font-size: 0.78rem;
-    }
-    .input-badge {
+    }}
+    .input-badge {{
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        background: #111827;
-        border: 1px solid #1f2937;
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 9999px;
         padding: 3px 10px;
-        color: #9ca3af;
-    }
-    .input-badge-green {
-        color: #34d399;
-        border-color: rgba(52, 211, 153, 0.3);
-        background: rgba(52, 211, 153, 0.08);
-    }
-    .input-caption {
+        color: var(--text-muted) !important;
+    }}
+    .input-badge-green {{
+        color: #10b981 !important;
+        border-color: rgba(16, 185, 129, 0.3) !important;
+        background: rgba(16, 185, 129, 0.08) !important;
+    }}
+    .input-caption {{
         display: flex;
         justify-content: space-between;
         align-items: center;
         font-size: 0.72rem;
-        color: #6b7280;
+        color: var(--text-muted) !important;
         margin-top: 6px;
         padding: 0 4px;
-    }
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -399,7 +464,7 @@ if (
 
 # Default Model & RAG parameters
 if "model_name" not in st.session_state:
-    st.session_state.model_name = "gemma-4-31b-it"
+    st.session_state.model_name = os.getenv("DEFAULT_MODEL", "gemini-3.5-flash-lite")
 
 if "embedding_model" not in st.session_state:
     st.session_state.embedding_model = os.getenv("EMBEDDING_MODEL", "all-minilm")
@@ -724,9 +789,9 @@ def show_settings_dialog():
 
         st.divider()
         model_choices = [
+            "gemini-3.5-flash-lite",
             "gemma-4-31b-it",
             "gemma-4-26b-a4b-it",
-            "gemini-3.5-flash-lite",
             "gemini-2.5-flash-lite",
             "gemini-2.5-flash",
             "gemini-1.5-flash",
@@ -906,7 +971,7 @@ with st.sidebar:
         st.session_state.active_nav_view = "💬 Assistant Chat"
         st.rerun()
 
-    # 3. Recent Sessions List (Fetched from SQLite DB)
+    # 3. Recent Sessions List (Scrollable Container)
     sessions_meta = st.session_state.engine.sessions.list_sessions_with_metadata()
     total_sess = len(sessions_meta)
     st.markdown(
@@ -919,36 +984,37 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    for s_info in sessions_meta:
-        s_id = s_info["session_id"]
-        s_title = s_info["title"] or s_id
-        is_active = (s_id == st.session_state.active_session_id)
-        col_s_name, col_s_del = st.columns([5, 1])
+    with st.container(height=260, border=False):
+        for s_info in sessions_meta:
+            s_id = s_info["session_id"]
+            s_title = s_info["title"] or s_id
+            is_active = (s_id == st.session_state.active_session_id)
+            col_s_name, col_s_del = st.columns([5, 1])
 
-        with col_s_name:
-            label = f"💬  {s_title}" if not is_active else f"▶  {s_title}"
-            if st.button(
-                label,
-                key=f"sess_btn_{s_id}",
-                width="stretch",
-                type="primary" if is_active else "secondary",
-            ):
-                st.session_state.active_session_id = s_id
-                st.session_state.active_nav_view = "💬 Assistant Chat"
-                st.rerun()
-
-        with col_s_del:
-            if total_sess > 1:
-                if st.button("✕", key=f"del_{s_id}", help=f"Delete {s_title}"):
-                    st.session_state.engine.sessions.delete_session(s_id)
-                    remaining = st.session_state.engine.sessions.list_sessions()
-                    if st.session_state.active_session_id == s_id:
-                        st.session_state.active_session_id = remaining[0] if remaining else "session_1"
+            with col_s_name:
+                label = f"💬  {s_title}" if not is_active else f"▶  {s_title}"
+                if st.button(
+                    label,
+                    key=f"sess_btn_{s_id}",
+                    width="stretch",
+                    type="primary" if is_active else "secondary",
+                ):
+                    st.session_state.active_session_id = s_id
+                    st.session_state.active_nav_view = "💬 Assistant Chat"
                     st.rerun()
+
+            with col_s_del:
+                if total_sess > 1:
+                    if st.button("✕", key=f"del_{s_id}", help=f"Delete {s_title}"):
+                        st.session_state.engine.sessions.delete_session(s_id)
+                        remaining = st.session_state.engine.sessions.list_sessions()
+                        if st.session_state.active_session_id == s_id:
+                            st.session_state.active_session_id = remaining[0] if remaining else "session_1"
+                        st.rerun()
 
     st.divider()
 
-    # 4. Bottom Knowledge Base & Settings Triggers
+    # 4. Bottom Knowledge Base & Documentation (Pinned to Bottom)
     kb_ready = (st.session_state.engine.vector_store is not None)
     num_chunks = len(st.session_state.engine.chunks) if kb_ready else 0
 
@@ -971,20 +1037,28 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
 
-    if st.button("⚙️  Settings & Knowledge", width="stretch", key="sb_settings_btn"):
-        show_settings_dialog()
+    col_kb_btn, col_doc_btn = st.columns(2)
+    with col_kb_btn:
+        if st.button("📁  Knowledge", width="stretch", key="sb_kb_btn", help="Switch to Knowledge Base view"):
+            st.session_state.active_nav_view = "📁 Knowledge Base"
+            st.rerun()
+    with col_doc_btn:
+        if st.button("📖  Docs", width="stretch", key="sb_docs_btn", help="Switch to Documentation view"):
+            st.session_state.active_nav_view = "📖 Documentation"
+            st.rerun()
 
-    if st.button("📖  Documentation", width="stretch", key="sb_docs_btn"):
-        show_docs_dialog()
+    if st.button("⚙️  Settings & Configuration", width="stretch", key="sb_settings_btn"):
+        show_settings_dialog()
 
 
 # ==============================================================================
-# MAIN VIEW: TOP NAVBAR
+# MAIN VIEW: TOP APPBAR & NAVBAR
 # ==============================================================================
 
 with st.container(border=True):
-    col_nav_brand, col_nav_tabs, col_nav_model, col_nav_actions = st.columns(
-        [2.6, 3.8, 2.0, 1.6], vertical_alignment="center"
+    # Row 1: Brand & Top Controls (Model, Theme Toggle, Settings, Clear)
+    col_nav_brand, col_nav_model, col_nav_theme, col_nav_settings, col_nav_clear = st.columns(
+        [4.2, 3.4, 0.8, 0.8, 0.8], vertical_alignment="center"
     )
 
     with col_nav_brand:
@@ -999,34 +1073,11 @@ with st.container(border=True):
             unsafe_allow_html=True,
         )
 
-    with col_nav_tabs:
-        nav_options = [
-            "💬 Assistant Chat",
-            "🔬 Head-to-Head Lab",
-            "📁 Knowledge Base",
-            "📖 Documentation",
-        ]
-        curr_view_idx = (
-            nav_options.index(st.session_state.active_nav_view)
-            if st.session_state.active_nav_view in nav_options
-            else 0
-        )
-        selected_nav = st.segmented_control(
-            "Navigation",
-            options=nav_options,
-            default=nav_options[curr_view_idx],
-            label_visibility="collapsed",
-            key="navbar_segmented_control",
-        )
-        if selected_nav and selected_nav != st.session_state.active_nav_view:
-            st.session_state.active_nav_view = selected_nav
-            st.rerun()
-
     with col_nav_model:
         model_options = [
+            "gemini-3.5-flash-lite",
             "gemma-4-31b-it",
             "gemma-4-26b-a4b-it",
-            "gemini-3.5-flash-lite",
             "gemini-2.5-flash-lite",
             "gemini-2.5-flash",
             "qwen2.5:0.5b",
@@ -1045,15 +1096,46 @@ with st.container(border=True):
             st.session_state.engine.model = selected_model
             st.rerun()
 
-    with col_nav_actions:
-        c_set, c_clr = st.columns(2)
-        with c_set:
-            if st.button("⚙️", key="top_settings_icon", help="Open Settings & Configuration", width="stretch"):
-                show_settings_dialog()
-        with c_clr:
-            if st.button("🗑️", key="top_clear_icon", help="Clear current chat messages", width="stretch"):
-                st.session_state.engine.sessions.clear_session(st.session_state.active_session_id)
-                st.rerun()
+    with col_nav_theme:
+        is_dark = (st.session_state.get("theme_mode", "dark") == "dark")
+        theme_icon = "☀️" if is_dark else "🌙"
+        theme_help = "Switch to Light Mode" if is_dark else "Switch to Dark Mode"
+        if st.button(theme_icon, key="top_theme_toggle", help=theme_help, width="stretch"):
+            st.session_state.theme_mode = "light" if is_dark else "dark"
+            st.rerun()
+
+    with col_nav_settings:
+        if st.button("⚙️", key="top_settings_icon", help="Open Settings & Configuration", width="stretch"):
+            show_settings_dialog()
+
+    with col_nav_clear:
+        if st.button("🗑️", key="top_clear_icon", help="Clear current chat messages", width="stretch"):
+            st.session_state.engine.sessions.clear_session(st.session_state.active_session_id)
+            st.rerun()
+
+    # Row 2: Full-Width Navigation Tabs
+    nav_options = [
+        "💬 Assistant Chat",
+        "🔬 Head-to-Head Lab",
+        "📁 Knowledge Base",
+        "📖 Documentation",
+    ]
+    curr_view_idx = (
+        nav_options.index(st.session_state.active_nav_view)
+        if st.session_state.active_nav_view in nav_options
+        else 0
+    )
+    selected_nav = st.segmented_control(
+        "Navigation",
+        options=nav_options,
+        default=nav_options[curr_view_idx],
+        label_visibility="collapsed",
+        key="navbar_segmented_control",
+        width="stretch",
+    )
+    if selected_nav and selected_nav != st.session_state.active_nav_view:
+        st.session_state.active_nav_view = selected_nav
+        st.rerun()
 
 # Sub-Navbar Telemetry & Readiness Strip
 t = st.session_state.telemetry
@@ -1091,10 +1173,10 @@ if st.session_state.active_nav_view == "💬 Assistant Chat":
     if not messages:
         engine = st.session_state.engine
         if engine.is_placeholder_kb:
-            hero_desc = "Gemma 4 RAG Assistant grounded in default Acme Technologies policy placeholder."
+            hero_desc = "RAG Assistant grounded in default Acme Technologies policy placeholder."
         else:
             sources_label = ", ".join(engine.active_source_names)
-            hero_desc = f"Gemma 4 RAG Assistant grounded in your active knowledge base ({sources_label})."
+            hero_desc = f"RAG Assistant grounded in your active knowledge base ({sources_label})."
 
         st.markdown(
             f"""
@@ -1265,7 +1347,7 @@ if st.session_state.active_nav_view == "💬 Assistant Chat":
     st.markdown(
         """
         <div class="input-caption">
-            <span>Powered by Gemma 4 31B-IT • Zero external data leakage</span>
+            <span>🔒 Zero external data leakage</span>
             <span>Shift + Enter for multiline</span>
         </div>
         """,

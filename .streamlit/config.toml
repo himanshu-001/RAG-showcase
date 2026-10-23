@@ -1,10 +1,5 @@
 [theme]
 base = "dark"
-primaryColor = "#2563eb"
-backgroundColor = "#0b0f19"
-secondaryBackgroundColor = "#111827"
-textColor = "#e5e7eb"
-borderColor = "#1f2937"
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
 codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
 baseRadius = "0.6rem"
@@ -14,7 +9,15 @@ showSidebarBorder = true
 paddingTop = "0.75rem"
 paddingBottom = "1.5rem"
 
-[theme.sidebar]
+[theme.dark]
+primaryColor = "#2563eb"
+backgroundColor = "#0b0f19"
+secondaryBackgroundColor = "#111827"
+textColor = "#e5e7eb"
+borderColor = "#1f2937"
+codeBackgroundColor = "#111827"
+
+[theme.dark.sidebar]
 backgroundColor = "#070b12"
 secondaryBackgroundColor = "#111827"
 codeBackgroundColor = "#111827"
@@ -22,6 +25,25 @@ textColor = "#e5e7eb"
 borderColor = "#1f2937"
 primaryColor = "#2563eb"
 linkColor = "#60a5fa"
+paddingTop = "0.75rem"
+paddingBottom = "1.5rem"
+
+[theme.light]
+primaryColor = "#2563eb"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8fafc"
+textColor = "#0f172a"
+borderColor = "#e2e8f0"
+codeBackgroundColor = "#f1f5f9"
+
+[theme.light.sidebar]
+backgroundColor = "#f8fafc"
+secondaryBackgroundColor = "#ffffff"
+codeBackgroundColor = "#f1f5f9"
+textColor = "#0f172a"
+borderColor = "#e2e8f0"
+primaryColor = "#2563eb"
+linkColor = "#2563eb"
 paddingTop = "0.75rem"
 paddingBottom = "1.5rem"
 

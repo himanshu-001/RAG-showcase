@@ -29,7 +29,7 @@ class ChatRequest(BaseModel):
     """Request payload for sending a chat query to the RAG pipeline."""
     question: str = Field(..., description="User question to answer using RAG")
     session_id: Optional[str] = Field("default", description="Session identifier for multi-turn conversational history")
-    model: Optional[str] = Field("gemma-4-31b-it", description="Model name (e.g. gemma-4-31b-it, gemini-3.5-flash-lite, or local Ollama qwen2.5:0.5b)")
+    model: Optional[str] = Field("gemini-3.5-flash-lite", description="Model name (e.g. gemini-3.5-flash-lite, gemma-4-31b-it, or local Ollama qwen2.5:0.5b)")
     temperature: Optional[float] = Field(0.0, ge=0.0, le=1.0, description="Sampling temperature")
     k: Optional[int] = Field(4, ge=1, le=10, description="Number of top context chunks to retrieve")
     strict_mode: Optional[bool] = Field(True, description="Strictly ground answers to retrieved context")

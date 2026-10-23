@@ -179,7 +179,7 @@ def is_ollama_model(model_name: Optional[str]) -> bool:
 
 
 def get_llm(
-    model: str = "gemma-4-31b-it",
+    model: str = "gemini-3.5-flash-lite",
     api_key: Optional[str] = None,
     temperature: float = 0.0,
     tools: Optional[List[Any]] = None,
@@ -705,7 +705,7 @@ class RAGEngine:
         chunk_size: int = 500,
         chunk_overlap: int = 100,
         api_key: Optional[str] = None,
-        model: str = "gemma-4-31b-it",
+        model: str = "gemini-3.5-flash-lite",
         embedding_model: Optional[str] = None,
         db_path: Optional[str] = None,
     ):
