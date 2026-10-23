@@ -1,6 +1,14 @@
 __pycache__
 *.pyc
+*.pyo
+*.pyd
 .venv
 .env
+.env.local
 .git
 .gitignore
+.agents
+.claude
+.codex
+.gemini
+data/chat_sessions.db

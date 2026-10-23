@@ -143,6 +143,42 @@ Interactive API documentation available at `http://localhost:8080/docs`.
 
 ---
 
+### Option C: Run with Docker & Docker Compose
+
+Launch both the **FastAPI backend** (port `8080`) and **Streamlit UI** (port `8501`) together:
+
+```bash
+# Build and start both services
+docker compose up --build
+```
+
+- **Streamlit Interactive UI**: [http://localhost:8501](http://localhost:8501)
+- **FastAPI Documentation**: [http://localhost:8080/docs](http://localhost:8080/docs)
+- **FastAPI Health Status**: [http://localhost:8080/health](http://localhost:8080/health)
+
+#### Advanced Docker Commands
+
+```bash
+# 1. Run only the FastAPI backend service
+docker compose up fastapi
+
+# 2. Run only the Streamlit UI service
+docker compose up streamlit
+
+# 3. Run a single unified container hosting both services concurrently
+docker compose --profile all-in-one up rag-unified
+# or directly with Docker CLI:
+docker run -d -p 8080:8080 -p 8501:8501 --env-file .env simple-rag:test
+
+# 4. Run automated tests inside the container
+docker compose run --rm fastapi python -c "import test.test_api as t; t.test_health(); t.test_root(); t.test_retrieve(); t.test_chat_session(); print('Container tests passed!')"
+```
+
+> **Note on Local Ollama in Docker:**
+> `docker-compose.yml` configures `host.docker.internal:host-gateway` and the container's entrypoint automatically routes requests to your host's Ollama instance at `http://host.docker.internal:11434`.
+
+---
+
 ## 🧪 Running Automated Tests
 
 Run the test suite in offline `TEST_MODE`:
@@ -159,13 +195,18 @@ python -c "import test.test_api as t; t.test_health(); t.test_root(); t.test_ret
 ├── app/
 │   ├── __init__.py
 │   ├── main.py              # FastAPI REST service
+│   ├── models.py            # Pydantic API and RAG models
 │   ├── rag_engine.py        # Core RAG engine: get_llm(), bind_tools, FAISS, session memory
 │   └── streamlit_app.py     # Streamlit UI with learning lab & per-session chat
 ├── data/
-│   └── company_policy.md    # Acme Technologies sample policy knowledge base
+│   ├── company_policy.md    # Acme Technologies sample policy knowledge base
+│   └── uploaded_sources/    # Directory for user-uploaded documents
 ├── test/
 │   └── test_api.py          # Automated test suite
 ├── .env                     # Environment variables & API keys
-├── Dockerfile               # Production Docker container configuration
+├── .env.example             # Template for environment configuration
+├── Dockerfile               # Multi-mode production Docker container configuration
+├── docker-compose.yml       # Multi-service composition (FastAPI + Streamlit + Volumes)
+├── entrypoint.sh            # Container entrypoint handling fastapi, streamlit, or both
 └── requirements.txt         # Pinned python dependencies
 ```

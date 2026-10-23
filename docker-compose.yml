@@ -1,0 +1,110 @@
+services:
+  # ============================================================================
+  # FastAPI REST API Backend
+  # ============================================================================
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_fastapi
+    command: fastapi
+    restart: unless-stopped
+    ports:
+      - "${FASTAPI_PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-31b-it}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
+      - TEST_MODE=${TEST_MODE:-false}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - rag-data:/app/data
+    extra_hosts:
+      # Allows connecting to local Ollama running on host (http://host.docker.internal:11434)
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ============================================================================
+  # Streamlit Interactive Web UI
+  # ============================================================================
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_streamlit
+    command: streamlit
+    restart: unless-stopped
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-31b-it}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
+      - TEST_MODE=${TEST_MODE:-false}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - rag-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================================================
+  # Optional: Single Unified Container running both services concurrently
+  # Usage: docker compose --profile all-in-one up rag-unified
+  # ============================================================================
+  rag-unified:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_unified
+    command: both
+    profiles:
+      - all-in-one
+    restart: unless-stopped
+    ports:
+      - "${FASTAPI_PORT:-8080}:8080"
+      - "${STREAMLIT_PORT:-8501}:8501"
+    environment:
+      - PORT=8080
+      - STREAMLIT_SERVER_PORT=8501
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gemma-4-31b-it}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
+      - TEST_MODE=${TEST_MODE:-false}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - rag-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  rag-data:
+    name: rag_shared_data
