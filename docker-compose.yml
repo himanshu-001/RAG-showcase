@@ -19,10 +19,19 @@ services:
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-3.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
       - TEST_MODE=${TEST_MODE:-false}
+      - GOOGLE_EMBEDDING_PRESET=${GOOGLE_EMBEDDING_PRESET:-free_tier}
+      - GOOGLE_EMBEDDING_BATCH_SIZE=${GOOGLE_EMBEDDING_BATCH_SIZE:-15}
+      - GOOGLE_EMBEDDING_DELAY_SEC=${GOOGLE_EMBEDDING_DELAY_SEC:-1.2}
+      - GOOGLE_EMBEDDING_RPM_LIMIT=${GOOGLE_EMBEDDING_RPM_LIMIT:-40}
+      - GOOGLE_EMBEDDING_TPM_LIMIT=${GOOGLE_EMBEDDING_TPM_LIMIT:-30000}
+      - GOOGLE_EMBEDDING_MAX_RETRIES=${GOOGLE_EMBEDDING_MAX_RETRIES:-5}
+      - GOOGLE_EMBEDDING_MAX_BACKOFF=${GOOGLE_EMBEDDING_MAX_BACKOFF:-65.0}
+      - GOOGLE_EMBEDDING_CACHE_ENABLED=${GOOGLE_EMBEDDING_CACHE_ENABLED:-true}
     env_file:
       - path: .env
         required: false
     volumes:
+      - ./app:/app/app
       - rag-data:/app/data
     extra_hosts:
       # Allows connecting to local Ollama running on host (http://host.docker.internal:11434)
@@ -55,10 +64,20 @@ services:
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-3.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
       - TEST_MODE=${TEST_MODE:-false}
+      - GOOGLE_EMBEDDING_PRESET=${GOOGLE_EMBEDDING_PRESET:-free_tier}
+      - GOOGLE_EMBEDDING_BATCH_SIZE=${GOOGLE_EMBEDDING_BATCH_SIZE:-15}
+      - GOOGLE_EMBEDDING_DELAY_SEC=${GOOGLE_EMBEDDING_DELAY_SEC:-1.2}
+      - GOOGLE_EMBEDDING_RPM_LIMIT=${GOOGLE_EMBEDDING_RPM_LIMIT:-40}
+      - GOOGLE_EMBEDDING_TPM_LIMIT=${GOOGLE_EMBEDDING_TPM_LIMIT:-30000}
+      - GOOGLE_EMBEDDING_MAX_RETRIES=${GOOGLE_EMBEDDING_MAX_RETRIES:-5}
+      - GOOGLE_EMBEDDING_MAX_BACKOFF=${GOOGLE_EMBEDDING_MAX_BACKOFF:-65.0}
+      - GOOGLE_EMBEDDING_CACHE_ENABLED=${GOOGLE_EMBEDDING_CACHE_ENABLED:-true}
     env_file:
       - path: .env
         required: false
     volumes:
+      - ./app:/app/app
+      - ./.streamlit:/app/.streamlit
       - rag-data:/app/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -97,10 +116,20 @@ services:
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gemini-3.5-flash-lite}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-minilm}
       - TEST_MODE=${TEST_MODE:-false}
+      - GOOGLE_EMBEDDING_PRESET=${GOOGLE_EMBEDDING_PRESET:-free_tier}
+      - GOOGLE_EMBEDDING_BATCH_SIZE=${GOOGLE_EMBEDDING_BATCH_SIZE:-15}
+      - GOOGLE_EMBEDDING_DELAY_SEC=${GOOGLE_EMBEDDING_DELAY_SEC:-1.2}
+      - GOOGLE_EMBEDDING_RPM_LIMIT=${GOOGLE_EMBEDDING_RPM_LIMIT:-40}
+      - GOOGLE_EMBEDDING_TPM_LIMIT=${GOOGLE_EMBEDDING_TPM_LIMIT:-30000}
+      - GOOGLE_EMBEDDING_MAX_RETRIES=${GOOGLE_EMBEDDING_MAX_RETRIES:-5}
+      - GOOGLE_EMBEDDING_MAX_BACKOFF=${GOOGLE_EMBEDDING_MAX_BACKOFF:-65.0}
+      - GOOGLE_EMBEDDING_CACHE_ENABLED=${GOOGLE_EMBEDDING_CACHE_ENABLED:-true}
     env_file:
       - path: .env
         required: false
     volumes:
+      - ./app:/app/app
+      - ./.streamlit:/app/.streamlit
       - rag-data:/app/data
     extra_hosts:
       - "host.docker.internal:host-gateway"

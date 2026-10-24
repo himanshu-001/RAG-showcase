@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from io import BytesIO
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 
 import streamlit as st
 from langchain_core.documents import Document
@@ -48,6 +48,7 @@ from app.rag_engine import (
     MAX_UPLOAD_BYTES,
     MAX_PDF_PAGES,
     JSON_ENDPOINT_TIMEOUT_SECONDS,
+    EmbeddingRateLimitConfig,
 )
 from app.models import RAGResponse, RetrievedSource, ToolCallRecord, ChunkInfo
 
@@ -510,6 +511,28 @@ if "use_tool_calling" not in st.session_state:
 if "gemini_api_key" not in st.session_state:
     st.session_state.gemini_api_key = get_api_key() or ""
 
+# Google AI Studio Embedding Rate Limiting & Throttling
+if "embedding_preset" not in st.session_state:
+    st.session_state.embedding_preset = os.getenv("GOOGLE_EMBEDDING_PRESET", "free_tier")
+
+if "embedding_batch_size" not in st.session_state:
+    st.session_state.embedding_batch_size = int(os.getenv("GOOGLE_EMBEDDING_BATCH_SIZE", "15"))
+
+if "embedding_delay" not in st.session_state:
+    st.session_state.embedding_delay = float(os.getenv("GOOGLE_EMBEDDING_DELAY_SEC", "1.2"))
+
+if "embedding_rpm_limit" not in st.session_state:
+    st.session_state.embedding_rpm_limit = int(os.getenv("GOOGLE_EMBEDDING_RPM_LIMIT", "40"))
+
+if "embedding_tpm_limit" not in st.session_state:
+    st.session_state.embedding_tpm_limit = int(os.getenv("GOOGLE_EMBEDDING_TPM_LIMIT", "30000"))
+
+if "embedding_max_backoff" not in st.session_state:
+    st.session_state.embedding_max_backoff = float(os.getenv("GOOGLE_EMBEDDING_MAX_BACKOFF", "65.0"))
+
+if "embedding_cache_enabled" not in st.session_state:
+    st.session_state.embedding_cache_enabled = os.getenv("GOOGLE_EMBEDDING_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+
 st.session_state.additional_documents = st.session_state.engine.kb_store.list_sources()
 
 # Active View Navigation (Chat, Lab, KB, Docs)
@@ -601,6 +624,7 @@ def rebuild_knowledge_base(
     chunk_overlap: int,
     uploaded_files=None,
     json_endpoint_url: str = "",
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
     """Rebuild the active knowledge base with chunking parameters and new sources."""
     if uploaded_files is not None:
@@ -616,8 +640,25 @@ def rebuild_knowledge_base(
     engine: RAGEngine = st.session_state.engine
     engine.chunk_size = chunk_size
     engine.chunk_overlap = chunk_overlap
+
+    # Construct active rate limiter config
+    cfg = EmbeddingRateLimitConfig(
+        preset=st.session_state.get("embedding_preset", "free_tier"),
+        batch_size=int(st.session_state.get("embedding_batch_size", 15)),
+        inter_batch_delay=float(st.session_state.get("embedding_delay", 1.2)),
+        rpm_limit=int(st.session_state.get("embedding_rpm_limit", 40)),
+        tpm_limit=int(st.session_state.get("embedding_tpm_limit", 30000)),
+        max_retries=5,
+        initial_backoff=8.0,
+        max_backoff=float(st.session_state.get("embedding_max_backoff", 65.0)),
+        enable_cache=bool(st.session_state.get("embedding_cache_enabled", True)),
+    )
+    engine.embedding_config = cfg
+
     engine.load_and_index(
         api_key=st.session_state.gemini_api_key,
+        progress_callback=progress_callback,
+        embedding_config=cfg,
     )
     st.session_state.additional_documents = engine.kb_store.list_sources()
 
@@ -751,19 +792,42 @@ def render_knowledge_base_ui(key_prefix: str, in_modal: bool = False) -> None:
     c_over = col_c2.slider("Chunk Overlap", 0, 300, engine.chunk_overlap, 10, key=f"{key_prefix}_c_over")
 
     if st.button("🔄 Ingest & Re-Index Knowledge Base Now", width="stretch", type="primary", key=f"{key_prefix}_btn_reindex"):
-        with st.spinner("Processing documents and rebuilding FAISS vector index..."):
-            try:
-                rebuild_knowledge_base(
-                    chunk_size=c_size,
-                    chunk_overlap=c_over,
-                    uploaded_files=uploaded_files,
-                    json_endpoint_url=json_endpoint_url,
-                )
-                total_chunks = len(engine.chunks)
-                st.toast(f"✅ Indexed successfully! Total chunks: {total_chunks}", icon="🚀")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Ingestion/Re-indexing failed: {e}")
+        status_box = st.status("Ingesting documents and indexing knowledge base...", expanded=True)
+        progress_bar = status_box.progress(0.0)
+        status_msg = status_box.empty()
+
+        def on_indexing_progress(evt: Dict[str, Any]):
+            pct = min(max(evt.get("percent", 0.0) / 100.0, 0.0), 1.0)
+            progress_bar.progress(pct)
+            msg = evt.get("message", "Processing chunks...")
+            if evt.get("is_waiting"):
+                status_msg.warning(msg)
+            else:
+                status_msg.info(msg)
+
+        try:
+            rebuild_knowledge_base(
+                chunk_size=c_size,
+                chunk_overlap=c_over,
+                uploaded_files=uploaded_files,
+                json_endpoint_url=json_endpoint_url,
+                progress_callback=on_indexing_progress,
+            )
+            total_chunks = len(engine.chunks)
+            status_box.update(
+                label=f"✅ Knowledge base indexed successfully! Total chunks: {total_chunks}",
+                state="complete",
+                expanded=False,
+            )
+            st.toast(f"✅ Indexed successfully! Total chunks: {total_chunks}", icon="🚀")
+            st.rerun()
+        except Exception as e:
+            status_box.update(
+                label=f"⚠️ Ingestion/Re-indexing failed: {e}",
+                state="error",
+                expanded=True,
+            )
+            st.error(f"Ingestion/Re-indexing failed: {e}")
 
     st.divider()
 
@@ -867,8 +931,154 @@ def show_settings_dialog():
         )
         st.session_state.embedding_model = new_emb
         st.session_state.engine.embedding_model = new_emb
+        if not is_ollama_embedding_model(new_emb):
+            with st.container(border=True):
+                st.markdown("##### 🛡️ Google AI Studio Quota Pacing & 429 Resilience")
+                st.caption(
+                    "Google AI Studio enforces strict Requests Per Minute (RPM) and Tokens Per Minute (TPM) caps "
+                    "(~30,000 TPM & 100 RPM on Free Tier). The built-in throttler proactively spaces requests and "
+                    "automatically waits and resumes when HTTP 429 quota exhaustion is encountered."
+                )
+
+                preset_opts = ["Free Tier Safe", "Paid Tier Fast", "Custom Pacing"]
+                preset_map = {
+                    "free_tier": "Free Tier Safe",
+                    "paid_tier": "Paid Tier Fast",
+                    "custom": "Custom Pacing",
+                }
+                inv_preset_map = {v: k for k, v in preset_map.items()}
+                curr_display = preset_map.get(st.session_state.embedding_preset, "Free Tier Safe")
+                chosen_display = st.segmented_control(
+                    "Quota Pacing Profile",
+                    options=preset_opts,
+                    default=curr_display,
+                    key="quota_profile_segmented",
+                )
+                if chosen_display:
+                    st.session_state.embedding_preset = inv_preset_map.get(chosen_display, "free_tier")
+
+                if st.session_state.embedding_preset == "free_tier":
+                    st.info(
+                        "🛡️ **Safe Free Tier Mode:** 15 chunks/batch, 1.2s delay, 40 RPM limit, 30,000 TPM limit. "
+                        "Paces ingestion strictly within Google AI Studio free tier quotas with automatic wait & resume on 429.",
+                        icon="ℹ️",
+                    )
+                    st.session_state.embedding_batch_size = 15
+                    st.session_state.embedding_delay = 1.2
+                    st.session_state.embedding_rpm_limit = 40
+                    st.session_state.embedding_tpm_limit = 30000
+                    st.session_state.embedding_max_backoff = 65.0
+                elif st.session_state.embedding_preset == "paid_tier":
+                    st.info(
+                        "⚡ **Paid Tier Fast Mode:** 50 chunks/batch, 0.2s delay, 300 RPM limit, 500,000 TPM limit. "
+                        "Optimized for pay-as-you-go Google Cloud / AI Studio projects with higher quotas.",
+                        icon="🚀",
+                    )
+                    st.session_state.embedding_batch_size = 50
+                    st.session_state.embedding_delay = 0.2
+                    st.session_state.embedding_rpm_limit = 300
+                    st.session_state.embedding_tpm_limit = 500000
+                    st.session_state.embedding_max_backoff = 30.0
+                else:
+                    col_q1, col_q2 = st.columns(2)
+                    st.session_state.embedding_batch_size = col_q1.slider(
+                        "Batch Size (chunks/request)",
+                        min_value=5,
+                        max_value=100,
+                        value=int(st.session_state.embedding_batch_size),
+                        step=5,
+                        help="Google API max is 100. Lower values (15-20) prevent exceeding TPM limits on free tier.",
+                    )
+                    st.session_state.embedding_delay = col_q2.slider(
+                        "Inter-Batch Delay (seconds)",
+                        min_value=0.1,
+                        max_value=5.0,
+                        value=float(st.session_state.embedding_delay),
+                        step=0.1,
+                        help="Delay between batch embedding calls to prevent burst rate limit rejection.",
+                    )
+                    col_q3, col_q4 = st.columns(2)
+                    st.session_state.embedding_rpm_limit = col_q3.slider(
+                        "RPM Threshold (Requests/Minute)",
+                        min_value=10,
+                        max_value=300,
+                        value=int(st.session_state.embedding_rpm_limit),
+                        step=5,
+                    )
+                    st.session_state.embedding_tpm_limit = col_q4.slider(
+                        "TPM Threshold (Tokens/Minute)",
+                        min_value=10000,
+                        max_value=200000,
+                        value=int(st.session_state.embedding_tpm_limit),
+                        step=5000,
+                    )
+                    st.session_state.embedding_max_backoff = st.slider(
+                        "Max 429 Backoff Wait (seconds)",
+                        min_value=10.0,
+                        max_value=120.0,
+                        value=float(st.session_state.embedding_max_backoff),
+                        step=5.0,
+                        help="Max time to sleep on 429 before next attempt. 65s guarantees full rolling minute quota reset.",
+                    )
+
+                # Sync back to engine
+                st.session_state.engine.embedding_config = EmbeddingRateLimitConfig(
+                    preset=st.session_state.embedding_preset,
+                    batch_size=st.session_state.embedding_batch_size,
+                    inter_batch_delay=st.session_state.embedding_delay,
+                    rpm_limit=st.session_state.embedding_rpm_limit,
+                    tpm_limit=st.session_state.embedding_tpm_limit,
+                    max_retries=5,
+                    initial_backoff=8.0,
+                    max_backoff=st.session_state.embedding_max_backoff,
+                    enable_cache=st.session_state.embedding_cache_enabled,
+                )
+
+                col_c1, col_c2 = st.columns([2, 1], vertical_alignment="center")
+                with col_c1:
+                    st.session_state.embedding_cache_enabled = st.toggle(
+                        "Persistent Embedding Cache",
+                        value=bool(st.session_state.embedding_cache_enabled),
+                        help="Reuses computed embeddings across re-indexing runs so unchanged chunks cost zero quota and 0s delay.",
+                    )
+                with col_c2:
+                    cache_stats = st.session_state.engine.embedding_cache.get_stats()
+                    st.caption(f"💾 Cached: {cache_stats['total_cached']:,} vectors")
+                    if st.button("🧹 Clear Cache", width="stretch", key="btn_clear_emb_cache"):
+                        st.session_state.engine.embedding_cache.clear()
+                        st.toast("Embedding cache cleared!", icon="🧹")
+                        st.rerun()
+
         if st.session_state.engine.indexed_embedding_model != new_emb:
-            st.info("Embedding model changed. Re-index the knowledge base before sending another query.")
+            st.warning(f"Embedding model changed to **{new_emb}**. Re-index is required before sending queries.")
+            if st.button(f"⚡ Re-Index Now with {new_emb}", type="primary", width="stretch", key="btn_reindex_model_switch"):
+                with st.status(f"Indexing knowledge base with {new_emb}...", expanded=True) as status_box:
+                    p_bar = status_box.progress(0.0)
+                    p_txt = status_box.empty()
+                    def _on_p(evt):
+                        pct = min(max(evt.get("percent", 0.0) / 100.0, 0.0), 1.0)
+                        p_bar.progress(pct)
+                        msg = evt.get("message", "Processing...")
+                        if evt.get("is_waiting"):
+                            p_txt.warning(msg)
+                        else:
+                            p_txt.info(msg)
+
+                    try:
+                        st.session_state.engine.load_and_index(
+                            api_key=st.session_state.gemini_api_key,
+                            progress_callback=_on_p,
+                        )
+                        status_box.update(
+                            label=f"Indexed {len(st.session_state.engine.chunks)} chunks with {new_emb}!",
+                            state="complete",
+                            expanded=False,
+                        )
+                        st.toast("Knowledge base re-indexed successfully!", icon="🚀")
+                        st.rerun()
+                    except Exception as exc:
+                        status_box.update(label=f"Re-indexing failed: {exc}", state="error", expanded=True)
+                        st.error(f"Failed: {exc}")
 
         st.session_state.top_k = st.slider(
             "Top-K Chunks to Retrieve",

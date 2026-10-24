@@ -31,6 +31,12 @@ This repository demonstrates the entire lifecycle of a production-style RAG pipe
    - **Streamlit**: Beautiful visual playground for exploring and testing with quick model-switching pill.
    - **FastAPI**: REST endpoints for health checks, retrieval inspection, and session chat.
 
+6. **Threshold-Based Quota Pacing & 429 Wait/Resume for Embeddings**:
+   - **Google AI Studio Quota Pacing**: Strictly enforces Google's Free Tier (~30,000 TPM & 40-100 RPM) and Paid Tier limits via rolling 60-second sliding-window request and token tracking.
+   - **Automatic 429 Catch & Auto-Resume**: Intercepts HTTP 429 / `RESOURCE_EXHAUSTED` errors during ingestion and indexing, waits out the quota reset window (with adaptive exponential backoff up to 65s or `Retry-After`), and resumes without restarting or losing previously embedded chunks.
+   - **Persistent SQLite Embedding Cache**: Caches chunk embeddings by `(sha256(content), model)`. Adding or modifying documents only embeds new/modified chunks, cutting down API usage and eliminating 429 bottlenecks.
+   - **Interactive UI Feedback**: Real-time progress bar, batch status indicators, throttling warnings, and quota countdown alerts directly in the Streamlit UI.
+
 ---
 
 ## 📐 How RAG Works

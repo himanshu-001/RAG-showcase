@@ -14,12 +14,19 @@ import os
 import time
 import json
 import sqlite3
-from typing import List, Dict, Any, Optional, Tuple
+import re
+import random
+import hashlib
+import threading
+from collections import deque
+from dataclasses import dataclass
+from typing import List, Dict, Any, Optional, Tuple, Callable
 from dotenv import load_dotenv
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
+from langchain_core.embeddings import Embeddings
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -288,15 +295,562 @@ def is_ollama_embedding_model(model_name: Optional[str]) -> bool:
     )
 
 
+DEFAULT_DB_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "chat_sessions.db"
+)
+
+
+@dataclass
+class EmbeddingRateLimitConfig:
+    """
+    Configuration metrics for Google AI Studio embedding model rate limiting.
+    Matches Google AI Studio's Free and Paid tier quota metrics (RPM, TPM, batch size, backoff).
+    """
+    preset: str = "free_tier"
+    batch_size: int = 15
+    inter_batch_delay: float = 1.2
+    rpm_limit: int = 40
+    tpm_limit: int = 30000
+    max_retries: int = 5
+    initial_backoff: float = 8.0
+    max_backoff: float = 65.0
+    enable_cache: bool = True
+
+    @classmethod
+    def from_preset(cls, preset: str = "free_tier", **overrides) -> "EmbeddingRateLimitConfig":
+        preset_clean = (preset or "free_tier").lower().strip()
+        if preset_clean in ("paid", "paid_tier", "payg"):
+            cfg = cls(
+                preset="paid_tier",
+                batch_size=50,
+                inter_batch_delay=0.2,
+                rpm_limit=300,
+                tpm_limit=500000,
+                max_retries=5,
+                initial_backoff=3.0,
+                max_backoff=30.0,
+                enable_cache=True,
+            )
+        elif preset_clean == "custom":
+            cfg = cls(
+                preset="custom",
+                batch_size=int(os.getenv("GOOGLE_EMBEDDING_BATCH_SIZE", "15")),
+                inter_batch_delay=float(os.getenv("GOOGLE_EMBEDDING_DELAY_SEC", "1.2")),
+                rpm_limit=int(os.getenv("GOOGLE_EMBEDDING_RPM_LIMIT", "40")),
+                tpm_limit=int(os.getenv("GOOGLE_EMBEDDING_TPM_LIMIT", "30000")),
+                max_retries=int(os.getenv("GOOGLE_EMBEDDING_MAX_RETRIES", "5")),
+                initial_backoff=float(os.getenv("GOOGLE_EMBEDDING_INITIAL_BACKOFF", "8.0")),
+                max_backoff=float(os.getenv("GOOGLE_EMBEDDING_MAX_BACKOFF", "65.0")),
+                enable_cache=os.getenv("GOOGLE_EMBEDDING_CACHE_ENABLED", "true").lower() in ("true", "1", "yes"),
+            )
+        else:  # "free_tier" default
+            cfg = cls(
+                preset="free_tier",
+                batch_size=15,
+                inter_batch_delay=1.2,
+                rpm_limit=40,
+                tpm_limit=30000,
+                max_retries=5,
+                initial_backoff=8.0,
+                max_backoff=65.0,
+                enable_cache=True,
+            )
+        for k, v in overrides.items():
+            if hasattr(cfg, k) and v is not None:
+                setattr(cfg, k, v)
+        return cfg
+
+    @classmethod
+    def from_env(cls) -> "EmbeddingRateLimitConfig":
+        preset = os.getenv("GOOGLE_EMBEDDING_PRESET", "free_tier")
+        batch_size = int(os.getenv("GOOGLE_EMBEDDING_BATCH_SIZE", "15")) if os.getenv("GOOGLE_EMBEDDING_BATCH_SIZE") else None
+        delay = float(os.getenv("GOOGLE_EMBEDDING_DELAY_SEC", "1.2")) if os.getenv("GOOGLE_EMBEDDING_DELAY_SEC") else None
+        rpm = int(os.getenv("GOOGLE_EMBEDDING_RPM_LIMIT", "40")) if os.getenv("GOOGLE_EMBEDDING_RPM_LIMIT") else None
+        tpm = int(os.getenv("GOOGLE_EMBEDDING_TPM_LIMIT", "30000")) if os.getenv("GOOGLE_EMBEDDING_TPM_LIMIT") else None
+        retries = int(os.getenv("GOOGLE_EMBEDDING_MAX_RETRIES", "5")) if os.getenv("GOOGLE_EMBEDDING_MAX_RETRIES") else None
+        max_backoff = float(os.getenv("GOOGLE_EMBEDDING_MAX_BACKOFF", "65.0")) if os.getenv("GOOGLE_EMBEDDING_MAX_BACKOFF") else None
+        cache_enabled = os.getenv("GOOGLE_EMBEDDING_CACHE_ENABLED", "true").lower() in ("true", "1", "yes")
+
+        overrides = {}
+        if batch_size is not None: overrides["batch_size"] = batch_size
+        if delay is not None: overrides["inter_batch_delay"] = delay
+        if rpm is not None: overrides["rpm_limit"] = rpm
+        if tpm is not None: overrides["tpm_limit"] = tpm
+        if retries is not None: overrides["max_retries"] = retries
+        if max_backoff is not None: overrides["max_backoff"] = max_backoff
+        overrides["enable_cache"] = cache_enabled
+
+        return cls.from_preset(preset=preset, **overrides)
+
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """Detect if an exception represents a 429 Too Many Requests or Quota Exceeded error."""
+    if exc is None:
+        return False
+
+    for attr in ("status", "status_code", "code"):
+        val = getattr(exc, attr, None)
+        if val in (429, "429", "RESOURCE_EXHAUSTED"):
+            return True
+
+    cause = getattr(exc, "__cause__", None)
+    if cause and is_rate_limit_error(cause):
+        return True
+
+    msg = str(exc).lower()
+    indicators = [
+        "429",
+        "resource_exhausted",
+        "resourceexhausted",
+        "resource has been exhausted",
+        "quota exceeded",
+        "rate limit",
+        "too many requests",
+        "quota_exceeded",
+    ]
+    return any(ind in msg for ind in indicators)
+
+
+def extract_retry_after(exc: Exception) -> Optional[float]:
+    """Attempt to parse retry duration in seconds from exception or error message."""
+    msg = str(exc)
+    cause = getattr(exc, "__cause__", None)
+    if cause:
+        msg = f"{msg} {str(cause)}"
+
+    patterns = [
+        r"(?:retry(?:-after|\s+in|\s+after)?|wait)\s*(?:is|for)?\s*[:=]?\s*([0-9]+(?:\.[0-9]+)?)\s*s(?:ec(?:onds?)?)?",
+        r"retry-after\s*:\s*([0-9]+(?:\.[0-9]+)?)",
+        r"['\"]?retrydelay['\"]?\s*:\s*['\"]?([0-9]+(?:\.[0-9]+)?)\s*s?['\"]?",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, msg, re.IGNORECASE)
+        if m:
+            try:
+                val = float(m.group(1))
+                if 0.5 <= val <= 300.0:
+                    return val
+            except (ValueError, IndexError):
+                pass
+    return None
+
+
+class EmbeddingCacheStore:
+    """
+    Persistent SQLite-backed embedding cache to prevent redundant embedding calls and 429 errors.
+    Stores embeddings keyed by (sha256(content), model).
+    """
+
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or DEFAULT_DB_PATH
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        return conn
+
+    def _init_db(self):
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS embedding_cache (
+                    content_hash TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    embedding_json TEXT NOT NULL,
+                    char_count INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (content_hash, model)
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_emb_cache_lookup ON embedding_cache(content_hash, model)")
+            conn.commit()
+
+    @staticmethod
+    def hash_text(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def get_batch(self, texts: List[str], model: str) -> Dict[str, List[float]]:
+        hashes = [self.hash_text(t) for t in texts]
+        if not hashes:
+            return {}
+        results: Dict[str, List[float]] = {}
+        with self._get_connection() as conn:
+            batch_size = 400
+            for i in range(0, len(hashes), batch_size):
+                chunk_hashes = hashes[i : i + batch_size]
+                placeholders = ",".join("?" for _ in chunk_hashes)
+                params = [model] + chunk_hashes
+                cur = conn.execute(
+                    f"SELECT content_hash, embedding_json FROM embedding_cache WHERE model = ? AND content_hash IN ({placeholders})",
+                    params,
+                )
+                for row in cur.fetchall():
+                    try:
+                        results[row["content_hash"]] = json.loads(row["embedding_json"])
+                    except Exception:
+                        pass
+        return results
+
+    def save_batch(self, items: List[Tuple[str, str, List[float], int]]) -> None:
+        """Save a batch of (content_hash, model, vector, char_count) items."""
+        if not items:
+            return
+        now = time.time()
+        records = [
+            (ch, m, json.dumps(vec), cc, now)
+            for ch, m, vec, cc in items
+        ]
+        with self._get_connection() as conn:
+            conn.executemany(
+                """
+                INSERT INTO embedding_cache (content_hash, model, embedding_json, char_count, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(content_hash, model) DO UPDATE SET
+                    embedding_json=excluded.embedding_json,
+                    created_at=excluded.created_at
+                """,
+                records,
+            )
+            conn.commit()
+
+    def get_stats(self) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT COUNT(*) as cnt, COUNT(DISTINCT model) as models FROM embedding_cache")
+            row = cur.fetchone()
+            return {"total_cached": row["cnt"] if row else 0, "models": row["models"] if row else 0}
+
+    def clear(self, model: Optional[str] = None) -> int:
+        with self._get_connection() as conn:
+            if model:
+                cur = conn.execute("DELETE FROM embedding_cache WHERE model = ?", (model,))
+            else:
+                cur = conn.execute("DELETE FROM embedding_cache")
+            conn.commit()
+            return cur.rowcount
+
+
+class GoogleEmbeddingThrottler:
+    """
+    Sliding-window token bucket and request throttler designed specifically for Google AI Studio.
+    Tracks active RPM (Requests Per Minute) and TPM (Tokens Per Minute) in a rolling 60-second window,
+    proactively pausing before requests exceed quota limits, and managing exponential backoff on 429.
+    """
+
+    def __init__(self, config: EmbeddingRateLimitConfig):
+        self.config = config
+        self._history: deque = deque()  # (timestamp, token_count)
+        self._lock = threading.Lock()
+        self._last_request_time = 0.0
+
+    def _clean_history(self, now: float):
+        cutoff = now - 60.0
+        while self._history and self._history[0][0] < cutoff:
+            self._history.popleft()
+
+    def wait_if_needed(
+        self,
+        estimated_tokens: int = 0,
+        on_wait: Optional[Callable[[str, float], None]] = None,
+    ) -> float:
+        with self._lock:
+            now = time.time()
+            self._clean_history(now)
+
+            total_wait = 0.0
+
+            # 1. Enforce minimum inter-batch spacing
+            if self.config.inter_batch_delay > 0:
+                elapsed = now - self._last_request_time
+                if elapsed < self.config.inter_batch_delay:
+                    total_wait = max(total_wait, self.config.inter_batch_delay - elapsed)
+
+            # 2. Enforce Requests Per Minute (RPM) threshold
+            if len(self._history) >= self.config.rpm_limit and self._history:
+                oldest_ts = self._history[0][0]
+                rpm_wait = (oldest_ts + 60.0) - now + 0.1
+                if rpm_wait > 0:
+                    total_wait = max(total_wait, rpm_wait)
+
+            # 3. Enforce Tokens Per Minute (TPM) threshold
+            current_tokens = sum(t for _, t in self._history)
+            if (current_tokens + estimated_tokens) > self.config.tpm_limit and self._history:
+                tokens_needed = (current_tokens + estimated_tokens) - self.config.tpm_limit
+                tokens_freed = 0
+                tpm_wait = 0.0
+                for ts, tok in self._history:
+                    tokens_freed += tok
+                    if tokens_freed >= tokens_needed:
+                        tpm_wait = (ts + 60.0) - now + 0.2
+                        break
+                if tpm_wait > 0:
+                    total_wait = max(total_wait, tpm_wait)
+
+            if total_wait > 0:
+                if on_wait:
+                    reasons = []
+                    if len(self._history) >= self.config.rpm_limit:
+                        reasons.append(f"RPM cap ({self.config.rpm_limit}/min)")
+                    if (current_tokens + estimated_tokens) > self.config.tpm_limit:
+                        reasons.append(f"TPM cap ({self.config.tpm_limit}/min)")
+                    if not reasons:
+                        reasons.append("Pacing delay")
+                    on_wait(f"Throttling for {total_wait:.1f}s to respect Google AI Studio {', '.join(reasons)}...", total_wait)
+                time.sleep(total_wait)
+                now = time.time()
+                self._clean_history(now)
+
+            self._history.append((now, estimated_tokens))
+            self._last_request_time = now
+            return total_wait
+
+    def handle_429(
+        self,
+        attempt: int,
+        error: Exception,
+        on_wait: Optional[Callable[[str, float], None]] = None,
+    ) -> float:
+        """Handle an HTTP 429 / ResourceExhausted error with adaptive exponential backoff."""
+        parsed_wait = extract_retry_after(error)
+        if parsed_wait is not None:
+            wait_time = parsed_wait + 1.0
+        else:
+            base = min(self.config.max_backoff, self.config.initial_backoff * (1.8 ** attempt))
+            jitter = random.uniform(0.5, 2.0)
+            wait_time = min(self.config.max_backoff, base + jitter)
+
+        if on_wait:
+            on_wait(
+                f"⚠️ Google AI Studio rate limit (429) hit. Waiting {wait_time:.1f}s for quota window to reset before resuming... (Attempt {attempt + 1}/{self.config.max_retries})",
+                wait_time,
+            )
+
+        time.sleep(wait_time)
+        with self._lock:
+            self._clean_history(time.time())
+        return wait_time
+
+
+class RateLimitedGoogleEmbeddings(Embeddings):
+    """
+    Rate-limited, quota-aware, and retry-resilient wrapper for Google AI Studio Embeddings.
+    Enforces metrics derived from Google AI Studio (RPM, TPM, burst spacing, batch sizing).
+    Automatically captures HTTP 429 / RESOURCE_EXHAUSTED errors, pauses until quota resets,
+    and resumes indexing without failing or restarting the job.
+    """
+
+    def __init__(
+        self,
+        underlying: Embeddings,
+        model_name: str,
+        config: Optional[EmbeddingRateLimitConfig] = None,
+        cache: Optional[EmbeddingCacheStore] = None,
+        throttler: Optional[GoogleEmbeddingThrottler] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
+        self.underlying = underlying
+        self.model_name = model_name
+        self.config = config or EmbeddingRateLimitConfig.from_env()
+        self.cache = cache
+        self.throttler = throttler or GoogleEmbeddingThrottler(self.config)
+        self.progress_callback = progress_callback
+
+    def set_progress_callback(self, cb: Optional[Callable[[Dict[str, Any]], None]]):
+        self.progress_callback = cb
+
+    def _notify(self, data: Dict[str, Any]):
+        if self.progress_callback:
+            try:
+                self.progress_callback(data)
+            except Exception:
+                pass
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+
+        total_chunks = len(texts)
+        cached_map: Dict[str, List[float]] = {}
+        hashes = [EmbeddingCacheStore.hash_text(t) for t in texts]
+
+        # 1. Check persistent SQLite cache if enabled
+        if self.cache and self.config.enable_cache:
+            try:
+                cached_map = self.cache.get_batch(texts, self.model_name)
+            except Exception:
+                cached_map = {}
+
+        missing_indices = [i for i, h in enumerate(hashes) if h not in cached_map]
+        total_missing = len(missing_indices)
+        num_cached = total_chunks - total_missing
+
+        if total_missing == 0:
+            self._notify({
+                "phase": "complete",
+                "current_chunk": total_chunks,
+                "total_chunks": total_chunks,
+                "cached_chunks": total_chunks,
+                "percent": 100.0,
+                "message": f"Reused all {total_chunks} chunks from embedding cache (0 API calls, 0 quota used).",
+                "is_waiting": False,
+            })
+            return [cached_map[h] for h in hashes]
+
+        if num_cached > 0:
+            self._notify({
+                "phase": "indexing",
+                "current_chunk": num_cached,
+                "total_chunks": total_chunks,
+                "cached_chunks": num_cached,
+                "percent": round(num_cached / total_chunks * 100, 1),
+                "message": f"Found {num_cached}/{total_chunks} chunks in cache. Embedding {total_missing} new/modified chunks...",
+                "is_waiting": False,
+            })
+
+        batch_size = max(1, self.config.batch_size)
+        total_batches = (total_missing + batch_size - 1) // batch_size
+        results: Dict[int, List[float]] = {}
+        newly_embedded_items: List[Tuple[str, str, List[float], int]] = []
+
+        processed_missing = 0
+        for batch_num in range(total_batches):
+            start = batch_num * batch_size
+            end = min(start + batch_size, total_missing)
+            batch_slice_indices = missing_indices[start:end]
+            batch_texts = [texts[idx] for idx in batch_slice_indices]
+
+            estimated_tokens = sum(max(1, len(t) // 4) for t in batch_texts)
+
+            # Proactive Rate Limiting (threshold wait if approaching RPM or TPM limit)
+            def on_pacing_wait(reason: str, wait_s: float):
+                overall_done = num_cached + processed_missing
+                pct = round(overall_done / total_chunks * 100, 1)
+                self._notify({
+                    "phase": "throttling",
+                    "current_chunk": overall_done,
+                    "total_chunks": total_chunks,
+                    "current_batch": batch_num + 1,
+                    "total_batches": total_batches,
+                    "percent": pct,
+                    "message": f"⏳ {reason}",
+                    "is_waiting": True,
+                    "wait_seconds": wait_s,
+                })
+
+            self.throttler.wait_if_needed(estimated_tokens, on_wait=on_pacing_wait)
+
+            # Reactive 429 Wait & Resume
+            vectors: Optional[List[List[float]]] = None
+            for attempt in range(self.config.max_retries):
+                try:
+                    overall_done = num_cached + processed_missing
+                    pct = round(overall_done / total_chunks * 100, 1)
+                    self._notify({
+                        "phase": "indexing",
+                        "current_chunk": overall_done,
+                        "total_chunks": total_chunks,
+                        "current_batch": batch_num + 1,
+                        "total_batches": total_batches,
+                        "percent": pct,
+                        "message": f"Embedding chunks {overall_done + 1}–{min(overall_done + len(batch_texts), total_chunks)} of {total_chunks} (Batch {batch_num + 1}/{total_batches})...",
+                        "is_waiting": False,
+                    })
+
+                    vectors = self.underlying.embed_documents(batch_texts, batch_size=len(batch_texts))
+                    break
+                except Exception as exc:
+                    if is_rate_limit_error(exc) and attempt < self.config.max_retries - 1:
+                        def on_429_wait(msg: str, wait_s: float):
+                            overall_done = num_cached + processed_missing
+                            pct = round(overall_done / total_chunks * 100, 1)
+                            self._notify({
+                                "phase": "rate_limit_wait",
+                                "current_chunk": overall_done,
+                                "total_chunks": total_chunks,
+                                "current_batch": batch_num + 1,
+                                "total_batches": total_batches,
+                                "percent": pct,
+                                "message": msg,
+                                "is_waiting": True,
+                                "wait_seconds": wait_s,
+                                "attempt": attempt + 1,
+                                "max_retries": self.config.max_retries,
+                            })
+
+                        self.throttler.handle_429(attempt, exc, on_wait=on_429_wait)
+
+                        self._notify({
+                            "phase": "resuming",
+                            "current_chunk": num_cached + processed_missing,
+                            "total_chunks": total_chunks,
+                            "current_batch": batch_num + 1,
+                            "total_batches": total_batches,
+                            "percent": round((num_cached + processed_missing) / total_chunks * 100, 1),
+                            "message": f"🔄 Quota reset window cleared! Resuming batch {batch_num + 1}/{total_batches}...",
+                            "is_waiting": False,
+                        })
+                    else:
+                        raise
+
+            if vectors is None or len(vectors) != len(batch_slice_indices):
+                raise RuntimeError(f"Embedding returned mismatched vectors for batch {batch_num + 1}")
+
+            for idx, vec in zip(batch_slice_indices, vectors):
+                results[idx] = vec
+                newly_embedded_items.append((hashes[idx], self.model_name, vec, len(texts[idx])))
+
+            processed_missing += len(batch_texts)
+
+            if self.cache and self.config.enable_cache and newly_embedded_items:
+                try:
+                    self.cache.save_batch(newly_embedded_items)
+                    newly_embedded_items.clear()
+                except Exception:
+                    pass
+
+        final_embeddings: List[List[float]] = []
+        for i, h in enumerate(hashes):
+            if h in cached_map:
+                final_embeddings.append(cached_map[h])
+            else:
+                final_embeddings.append(results[i])
+
+        return final_embeddings
+
+    def embed_query(self, text: str) -> List[float]:
+        tokens = max(1, len(text) // 4)
+        self.throttler.wait_if_needed(tokens)
+
+        for attempt in range(self.config.max_retries):
+            try:
+                return self.underlying.embed_query(text)
+            except Exception as exc:
+                if is_rate_limit_error(exc) and attempt < self.config.max_retries - 1:
+                    self.throttler.handle_429(attempt, exc)
+                else:
+                    raise
+        return self.underlying.embed_query(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.underlying, name)
+
+
 def get_embeddings(
     api_key: Optional[str] = None,
     model: str = "all-minilm",
+    config: Optional[EmbeddingRateLimitConfig] = None,
+    cache: Optional[EmbeddingCacheStore] = None,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ):
     """
     Returns text embeddings instance:
     - If model is an Ollama model (e.g. 'all-minilm', 'nomic-embed-text'), returns OllamaEmbeddings.
       100% local, runs on http://localhost:11434, zero quota limits, zero cost, no cloud key required.
-    - If Google model (models/gemini-embedding-001), returns GoogleGenerativeAIEmbeddings.
+    - If Google model (models/gemini-embedding-001, models/text-embedding-004), returns RateLimitedGoogleEmbeddings
+      with threshold-based pacing (RPM, TPM, batch size) and automatic 429 wait/resume.
     - Falls back to FakeEmbeddings in TEST_MODE.
     """
     if TEST_MODE:
@@ -329,15 +883,21 @@ def get_embeddings(
 
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-    return GoogleGenerativeAIEmbeddings(
+    underlying = GoogleGenerativeAIEmbeddings(
         model=model,
         google_api_key=key,
     )
 
+    rate_config = config or EmbeddingRateLimitConfig.from_env()
+    cache_store = cache or (EmbeddingCacheStore() if rate_config.enable_cache else None)
 
-DEFAULT_DB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "chat_sessions.db"
-)
+    return RateLimitedGoogleEmbeddings(
+        underlying=underlying,
+        model_name=model,
+        config=rate_config,
+        cache=cache_store,
+        progress_callback=progress_callback,
+    )
 
 
 class SessionStore:
@@ -721,6 +1281,8 @@ class RAGEngine:
         self.chunks: List[Document] = []
         self.sessions = SessionStore(db_path=db_path)
         self.kb_store = KnowledgeBaseStore(db_path=db_path)
+        self.embedding_cache = EmbeddingCacheStore(db_path=db_path)
+        self.embedding_config = EmbeddingRateLimitConfig.from_env()
         self.is_placeholder_kb: bool = True
         self.active_source_names: List[str] = []
 
@@ -728,10 +1290,13 @@ class RAGEngine:
         self,
         custom_docs: Optional[List[Document]] = None,
         api_key: Optional[str] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        embedding_config: Optional[EmbeddingRateLimitConfig] = None,
     ):
         """
         Loads documents, splits into chunks, and initializes the FAISS vector index.
         Uses persistent custom sources if available, otherwise falls back to company_policy.md placeholder.
+        Enforces rate limiting, token pacing, and automatic 429 wait/resume for Google embeddings.
         """
         if api_key:
             self.api_key = api_key
@@ -751,6 +1316,15 @@ class RAGEngine:
         if not self.raw_documents:
             self.chunks = []
             self.vector_store = None
+            if progress_callback:
+                progress_callback({
+                    "phase": "complete",
+                    "current_chunk": 0,
+                    "total_chunks": 0,
+                    "percent": 100.0,
+                    "message": "No documents to index.",
+                    "is_waiting": False,
+                })
             return
 
         # 1. Chunking Phase (Recursive Character Splitting)
@@ -766,10 +1340,26 @@ class RAGEngine:
             chunk.metadata["chunk_id"] = idx + 1
             chunk.metadata["char_count"] = len(chunk.page_content)
 
-        # 2. Vector Embedding & FAISS Indexing
-        embeddings = get_embeddings(api_key=self.api_key, model=self.embedding_model)
+        # 2. Vector Embedding & FAISS Indexing with Threshold Pacing & 429 Resilience
+        eff_config = embedding_config or self.embedding_config
+        embeddings = get_embeddings(
+            api_key=self.api_key,
+            model=self.embedding_model,
+            config=eff_config,
+            cache=self.embedding_cache,
+            progress_callback=progress_callback,
+        )
         self.vector_store = FAISS.from_documents(self.chunks, embeddings)
         self.indexed_embedding_model = self.embedding_model
+        if progress_callback:
+            progress_callback({
+                "phase": "complete",
+                "current_chunk": len(self.chunks),
+                "total_chunks": len(self.chunks),
+                "percent": 100.0,
+                "message": f"Successfully indexed {len(self.chunks)} chunks into vector store.",
+                "is_waiting": False,
+            })
 
     def add_source(
         self,
@@ -778,6 +1368,7 @@ class RAGEngine:
         source_type: str = "file",
         source_id: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """Add a persistent source to the knowledge base and re-index."""
         res = self.kb_store.add_source(
@@ -787,20 +1378,27 @@ class RAGEngine:
             source_id=source_id,
             meta=meta,
         )
-        self.load_and_index()
+        self.load_and_index(progress_callback=progress_callback)
         return res
 
-    def remove_source(self, source_id: str) -> bool:
+    def remove_source(
+        self,
+        source_id: str,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> bool:
         """Remove a persistent source and re-index."""
         removed = self.kb_store.remove_source(source_id)
         if removed:
-            self.load_and_index()
+            self.load_and_index(progress_callback=progress_callback)
         return removed
 
-    def clear_sources(self) -> int:
+    def clear_sources(
+        self,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> int:
         """Clear all custom sources (reverting to default placeholder) and re-index."""
         count = self.kb_store.clear_sources()
-        self.load_and_index()
+        self.load_and_index(progress_callback=progress_callback)
         return count
 
     def get_sources_summary(self) -> Dict[str, Any]:
