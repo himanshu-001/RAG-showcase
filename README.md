@@ -68,7 +68,7 @@ Using `uv` (recommended) or standard `pip`:
 
 ```bash
 # Clone the repository and navigate into the directory
-cd simple_rag/Deployment_LIVE
+cd simple-rag-assistant/
 
 # Activate existing virtual environment
 source .venv/bin/activate

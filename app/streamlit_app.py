@@ -436,6 +436,29 @@ st.markdown(
         margin-top: 6px;
         padding: 0 4px;
     }}
+
+    /* 7. Bottom Dock & Chat Input Clearance */
+    [data-testid="stMainBlockContainer"] {{
+        padding-bottom: 9rem !important;
+    }}
+
+    [data-testid="stBottom"],
+    [data-testid="stBottom"] > div,
+    [data-testid="stBottomBlockContainer"] {{
+        background-color: var(--bg-main) !important;
+        z-index: 99 !important;
+    }}
+
+    [data-testid="stChatInput"] {{
+        background-color: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 12px !important;
+    }}
+
+    [data-testid="stChatInput"] textarea {{
+        color: var(--text-primary) !important;
+        background-color: transparent !important;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -1239,26 +1262,29 @@ if st.session_state.active_nav_view == "💬 Assistant Chat":
                 # 3. Citation Sources Expander
                 if msg.sources:
                     with st.expander(f"📚 {len(msg.sources)} Retrieved Sources", expanded=False):
-                        for src in msg.sources:
-                            with st.container(border=True):
-                                st.caption(
-                                    f"Chunk {src.chunk_id} · L2 relevance {src.similarity_pct}% "
-                                    f"· distance {src.distance} · {src.source}"
-                                )
-                                st.code(src.content, language="markdown")
+                        with st.container(height=320):
+                            for src in msg.sources:
+                                with st.container(border=True):
+                                    st.caption(
+                                        f"Chunk {src.chunk_id} · L2 relevance {src.similarity_pct}% "
+                                        f"· distance {src.distance} · {src.source}"
+                                    )
+                                    st.code(src.content, language="markdown")
 
                 # 4. Prompt Inspector
                 if msg.prompt:
                     with st.expander("📝 Grounded Prompt Sent to LLM", expanded=False):
-                        st.code(msg.prompt, language="markdown")
+                        with st.container(height=260):
+                            st.code(msg.prompt, language="markdown")
 
                 # 5. Tool Calls Log
                 if msg.tool_calls:
                     with st.expander("🛠️ Tool Calling Execution Log", expanded=False):
-                        for tc in msg.tool_calls:
-                            with st.container(border=True):
-                                st.caption(f"Tool: {tc.tool}")
-                                st.code(f"Arguments: {tc.args}\nResult: {tc.output}", language="text")
+                        with st.container(height=260):
+                            for tc in msg.tool_calls:
+                                with st.container(border=True):
+                                    st.caption(f"Tool: {tc.tool}")
+                                    st.code(f"Arguments: {tc.args}\nResult: {tc.output}", language="text")
 
     # Input Badges & Chat Input
     engine = st.session_state.engine

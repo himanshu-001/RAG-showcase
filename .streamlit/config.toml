@@ -7,7 +7,6 @@ buttonRadius = "0.6rem"
 showWidgetBorder = true
 showSidebarBorder = true
 paddingTop = "0.75rem"
-paddingBottom = "1.5rem"
 
 [theme.dark]
 primaryColor = "#2563eb"
